@@ -1,8 +1,10 @@
 {
     "pushed_problems": [
-        "33.Search in Rotated Sorted Array",
+        "49.Group Anagrams",
+        "74.Search a 2D Matrix",
         "46.Permutations",
         "66.Plus One",
-        "49.Group Anagrams"
+        "2737.Row With Maximum Ones",
+        "33.Search in Rotated Sorted Array"
     ]
 }
