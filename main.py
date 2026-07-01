@@ -19,6 +19,12 @@ import re
 import argparse
 import requests
 
+# Directory the script itself lives in -- used so output/state paths are
+# stable regardless of the working directory the script is invoked from
+# (e.g. via a wrapper shell script that doesn't cd first).
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SOLUTIONS_DIR = os.path.join(SCRIPT_DIR, "LeetCode_Solutions")
+
 # Default configuration values
 DEFAULT_DOMAIN = "leetcode.com"
 DEFAULT_DELAY = 1.0
@@ -38,6 +44,15 @@ query submissionList($offset: Int!, $limit: Int!, $lastKey: String) {
       titleSlug
       timestamp
     }
+  }
+}
+"""
+
+USER_STATUS_QUERY = """
+query globalData {
+  userStatus {
+    isSignedIn
+    username
   }
 }
 """
@@ -146,9 +161,9 @@ def load_dotenv(dotenv_path=".env"):
 
 def load_config(env_path):
     load_dotenv(env_path)
-    
+
     config = {}
-    
+
     # Priority:
     # 1. LEETCODE_COOKIE
     # 2. LEETCODE_SESSION & LEETCODE_CSRF_TOKEN
@@ -158,10 +173,10 @@ def load_config(env_path):
         csrf = os.environ.get('LEETCODE_CSRF_TOKEN', '')
         if session:
             cookie = f"LEETCODE_SESSION={session}; csrftoken={csrf};"
-    
+
     config['cookie'] = cookie or ''
     config['domain'] = os.environ.get('LEETCODE_DOMAIN', DEFAULT_DOMAIN)
-    
+
     delay_str = os.environ.get('LEETCODE_DELAY')
     if delay_str:
         try:
@@ -170,7 +185,7 @@ def load_config(env_path):
             config['rate_limit_delay'] = DEFAULT_DELAY
     else:
         config['rate_limit_delay'] = DEFAULT_DELAY
-        
+
     return config
 
 def update_env_var(dotenv_path, key, value):
@@ -182,7 +197,7 @@ def update_env_var(dotenv_path, key, value):
                 lines = f.readlines()
         except Exception as e:
             print(f"Warning: Failed to read {dotenv_path} for updating: {e}")
-            
+
     # Iterate through the lines and look for key=
     for idx, line in enumerate(lines):
         stripped = line.strip()
@@ -193,13 +208,13 @@ def update_env_var(dotenv_path, key, value):
             lines[idx] = f"{key}={value}\n"
             found = True
             break
-            
+
     if not found:
         # If not found, check if last line ends with newline
         if lines and not lines[-1].endswith('\n'):
             lines.append('\n')
         lines.append(f"{key}={value}\n")
-        
+
     try:
         with open(dotenv_path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
@@ -239,7 +254,7 @@ def query_graphql(query, variables, headers, domain):
                 if resp.status_code == 403:
                     raise Exception("GraphQL request failed with HTTP 403 (Forbidden). Your cookies might be invalid or expired.")
                 raise Exception(f"GraphQL request failed with HTTP {resp.status_code}: {resp.text}")
-            
+
             data = resp.json()
             if 'errors' in data:
                 raise Exception(f"GraphQL returned errors: {data['errors']}")
@@ -261,15 +276,15 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '░' * (length - filled_length)
-    
+
     static_part = f"{prefix} |{bar}| {percent}% "
     width = get_terminal_width()
-    
+
     # Leave room for carriage return and potential terminal quirks
     max_suffix_len = width - len(static_part) - 4
     if max_suffix_len > 0 and len(suffix) > max_suffix_len:
         suffix = suffix[:max_suffix_len - 3] + "..."
-        
+
     sys.stdout.write(f'\r\033[K{static_part}{suffix}')
     sys.stdout.flush()
     if iteration == total:
@@ -278,16 +293,16 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 
 def main():
     parser = argparse.ArgumentParser(description="Sync solved LeetCode solutions to local files.")
-    parser.add_argument("--env", default=".env", help="Path to .env config file")
+    parser.add_argument("--env", default="/home/nitesh/Assets/LeetCode-Submissions/.env", help="Path to .env config file")
     parser.add_argument("--reset", action="store_true", help="Reset sync state and download everything from scratch")
     parser.add_argument("--delay", type=float, help="Delay between downloading submissions (in seconds)")
     args = parser.parse_args()
 
     # Auto-migration: If .env doesn't exist, but config.json exists, migrate it!
-    if not os.path.exists(args.env) and os.path.exists("config.json"):
+    if not os.path.exists(args.env) and os.path.exists(os.path.join(SCRIPT_DIR, "config.json")):
         print("Found legacy 'config.json'. Migrating configuration to '.env'...")
         try:
-            with open("config.json", "r", encoding="utf-8") as f:
+            with open(os.path.join(SCRIPT_DIR, "config.json"), "r", encoding="utf-8") as f:
                 old_config = json.load(f)
             cookie_str = old_config.get("cookie", "")
             cookies = parse_cookies(cookie_str)
@@ -295,7 +310,7 @@ def main():
             csrf = cookies.get("csrftoken", "")
             domain = old_config.get("domain", "leetcode.com")
             delay_val = old_config.get("rate_limit_delay", 1.0)
-            
+
             with open(args.env, "w", encoding="utf-8") as f:
                 f.write("# LeetCode Configuration Environment Variables\n\n")
                 f.write(f"LEETCODE_SESSION={session}\n")
@@ -304,7 +319,7 @@ def main():
                 f.write(f"LEETCODE_DELAY={delay_val}\n")
             print(f"Migration complete! Created '{args.env}' successfully.")
             try:
-                os.rename("config.json", "config.json.bak")
+                os.rename(os.path.join(SCRIPT_DIR, "config.json"), os.path.join(SCRIPT_DIR, "config.json.bak"))
                 print("Renamed 'config.json' to 'config.json.bak' for backup.")
             except Exception as e:
                 print(f"Warning: Could not rename config.json: {e}")
@@ -336,27 +351,27 @@ def main():
     config = load_config(args.env)
 
     # Auto-migration of state: If state.json exists, migrate it to the env file!
-    if os.path.exists("state.json"):
+    if os.path.exists(os.path.join(SCRIPT_DIR, "state.json")):
         print("Found legacy 'state.json'. Migrating sync state to '.env'...")
         try:
-            with open("state.json", "r", encoding="utf-8") as f:
+            with open(os.path.join(SCRIPT_DIR, "state.json"), "r", encoding="utf-8") as f:
                 old_state = json.load(f)
             ts = old_state.get("last_synced_timestamp", 0)
             update_env_var(args.env, "LEETCODE_LAST_SYNCED_TIMESTAMP", ts)
             os.environ["LEETCODE_LAST_SYNCED_TIMESTAMP"] = str(ts)
             print(f"Migration complete! Saved last_synced_timestamp={ts} to '{args.env}'.")
             try:
-                os.rename("state.json", "state.json.bak")
+                os.rename(os.path.join(SCRIPT_DIR, "state.json"), os.path.join(SCRIPT_DIR, "state.json.bak"))
                 print("Renamed 'state.json' to 'state.json.bak' for backup.")
             except Exception as e:
                 print(f"Warning: Could not rename state.json: {e}")
         except Exception as e:
             print(f"Warning: State migration failed: {e}")
-    
+
     # Check if the cookie is set and is not a placeholder
     cookie_val = config.get('cookie', '')
-    if (not cookie_val or 
-        "your_leetcode_session_here" in cookie_val or 
+    if (not cookie_val or
+        "your_leetcode_session_here" in cookie_val or
         "your_csrftoken_here" in cookie_val or
         "your_leetcode_session_here" in os.environ.get('LEETCODE_SESSION', '') or
         "your_csrftoken_here" in os.environ.get('LEETCODE_CSRF_TOKEN', '')):
@@ -397,12 +412,28 @@ def main():
     last_synced_ts = state.get("last_synced_timestamp", 0)
     print(f"Syncing submissions solved after: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_synced_ts)) if last_synced_ts > 0 else 'Beginning of time'}")
 
+    # Verify authentication before doing anything else. LeetCode's submissionList
+    # query does NOT error out on a stale/invalid cookie -- it just silently
+    # returns an empty submissions list, which looks identical to "already synced".
+    try:
+        status_data = query_graphql(USER_STATUS_QUERY, {}, headers, domain)
+        user_status = status_data.get('userStatus', {})
+        if not user_status.get('isSignedIn'):
+            print("\nError: LeetCode does not recognize you as signed in.")
+            print("Your LEETCODE_SESSION / csrftoken cookies are likely expired or invalid.")
+            print(f"Please grab fresh cookies from {domain} and update '{args.env}'.")
+            sys.exit(1)
+        else:
+            print(f"Authenticated as: {user_status.get('username')}")
+    except Exception as e:
+        print(f"\nWarning: Could not verify authentication status: {e}")
+
     # Fetch submissions paginated
     offset = 0
     limit = 20
     submissions_to_process = []
     has_next = True
-    
+
     print("Fetching submission history...")
     while has_next:
         variables = {
@@ -465,11 +496,11 @@ def main():
     print(f"\nProcessing {len(submissions_to_process)} submissions in chronological order...")
 
     # Create LeetCode_Solutions directory if it doesn't exist
-    os.makedirs("LeetCode_Solutions", exist_ok=True)
+    os.makedirs(SOLUTIONS_DIR, exist_ok=True)
 
     success_count = 0
     skip_count = 0
-    
+
     for i, sub in enumerate(submissions_to_process, 1):
         ts = int(sub['timestamp'])
         sub_id = int(sub['id'])
@@ -489,7 +520,7 @@ def main():
             continue
 
         # Check if we already have a local solution for this problem/language (e.g. from previous years/runs)
-        if has_local_solution("LeetCode_Solutions", title, lang):
+        if has_local_solution(SOLUTIONS_DIR, title, lang):
             state["last_synced_timestamp"] = ts
             save_state(args.env, state)
             skip_count += 1
@@ -523,20 +554,20 @@ def main():
 
         # Map language to file extension
         ext = LANG_TO_EXT.get(lang.lower(), lang.lower())
-        
+
         # Sanitize folder name
         safe_title = sanitize_name(question_title)
         safe_id = sanitize_name(question_id)
         folder_name = f"{safe_id}.{safe_title}"
-        problem_dir = os.path.join("LeetCode_Solutions", folder_name)
-        
+        problem_dir = os.path.join(SOLUTIONS_DIR, folder_name)
+
         # Create directory for the problem
         os.makedirs(problem_dir, exist_ok=True)
-        
+
         # Save code to solution file
         file_name = f"solution.{ext}"
         file_path = os.path.join(problem_dir, file_name)
-        
+
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(code)
