@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #################################################################
 #                         PURPOSE                               #
 #################################################################
@@ -293,7 +292,7 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 
 def main():
     parser = argparse.ArgumentParser(description="Sync solved LeetCode solutions to local files.")
-    parser.add_argument("--env", default="/home/nitesh/Assets/LeetCode-Submissions/.env", help="Path to .env config file")
+    parser.add_argument("--env", default=os.path.join(SCRIPT_DIR, ".env"), help="Path to .env config file")
     parser.add_argument("--reset", action="store_true", help="Reset sync state and download everything from scratch")
     parser.add_argument("--delay", type=float, help="Delay between downloading submissions (in seconds)")
     args = parser.parse_args()
