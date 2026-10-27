@@ -2,13 +2,15 @@
 #                         PURPOSE                               #
 #################################################################
 
-# script is to get all the submission i have till now and download them ony those who accepted ,
-# avoiding duplication submissions to be downloaded again
-# the the submissions are stored in the folder "LeetCode_Solution" with folder for each problem folder name=> <p.no><p.title>
-# folder tree
-# LeetCode_Solution
-#   |-><problem no><probelm title>
-#            |-><problem no><problem title>
+# Script to get all submissions and download accepted ones,
+# avoiding duplicate submissions being downloaded again.
+#
+# The submissions are stored in the folder "LeetCode_Solutions"
+# with a folder for each problem:
+#
+# LeetCode_Solutions/
+#   └── <problem_no>.<problem_title>/
+#       └── solution.<extension>
 
 import os
 import sys
@@ -18,18 +20,28 @@ import re
 import argparse
 import requests
 
-# Directory the script itself lives in -- used so output/state paths are
-# stable regardless of the working directory the script is invoked from
-# (e.g. via a wrapper shell script that doesn't cd first).
+
+# Directory the script itself lives in -- used so output/state paths
+# are stable regardless of the working directory the script is invoked from.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SOLUTIONS_DIR = os.path.join(SCRIPT_DIR, "LeetCode_Solutions")
+MY_PROBLEMS_FILE = os.path.join(SCRIPT_DIR, "my_problems.txt")
+
 
 # Default configuration values
 DEFAULT_DOMAIN = "leetcode.com"
 DEFAULT_DELAY = 1.0
-DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
+
+# ================================================================
 # GraphQL Queries
+# ================================================================
+
 SUBMISSION_LIST_QUERY = """
 query submissionList($offset: Int!, $limit: Int!, $lastKey: String) {
   submissionList(offset: $offset, limit: $limit, lastKey: $lastKey) {
@@ -47,6 +59,7 @@ query submissionList($offset: Int!, $limit: Int!, $lastKey: String) {
 }
 """
 
+
 USER_STATUS_QUERY = """
 query globalData {
   userStatus {
@@ -55,6 +68,7 @@ query globalData {
   }
 }
 """
+
 
 SUBMISSION_DETAILS_QUERY = """
 query submissionDetails($submissionId: Int!) {
@@ -79,84 +93,153 @@ query submissionDetails($submissionId: Int!) {
 }
 """
 
-# Language to extension mapping
-LANG_TO_EXT = {
-    'cpp': 'cpp',
-    'java': 'java',
-    'python': 'py',
-    'python3': 'py',
-    'javascript': 'js',
-    'typescript': 'ts',
-    'csharp': 'cs',
-    'golang': 'go',
-    'rust': 'rs',
-    'ruby': 'rb',
-    'swift': 'swift',
-    'php': 'php',
-    'kotlin': 'kt',
-    'dart': 'dart',
-    'scala': 'scala',
-    'c': 'c',
-    'mysql': 'sql',
-    'mssql': 'sql',
-    'oraclesql': 'sql',
-    'postgresql': 'sql',
-    'bash': 'sh',
+
+MY_SOLVED_PROBLEMS_QUERY = """
+query problemsetQuestionList(
+  $categorySlug: String,
+  $limit: Int,
+  $skip: Int,
+  $filters: QuestionListFilterInput
+) {
+  problemsetQuestionList(
+    categorySlug: $categorySlug,
+    limit: $limit,
+    skip: $skip,
+    filters: $filters
+  ) {
+    total
+    questions {
+      frontendQuestionId
+      title
+      titleSlug
+      status
+    }
+  }
 }
+"""
+
+
+# ================================================================
+# Language to extension mapping
+# ================================================================
+
+LANG_TO_EXT = {
+    "cpp": "cpp",
+    "java": "java",
+    "python": "py",
+    "python3": "py",
+    "javascript": "js",
+    "typescript": "ts",
+    "csharp": "cs",
+    "golang": "go",
+    "rust": "rs",
+    "ruby": "rb",
+    "swift": "swift",
+    "php": "php",
+    "kotlin": "kt",
+    "dart": "dart",
+    "scala": "scala",
+    "c": "c",
+    "mysql": "sql",
+    "mssql": "sql",
+    "oraclesql": "sql",
+    "postgresql": "sql",
+    "bash": "sh",
+}
+
+
+# ================================================================
+# Utility Functions
+# ================================================================
 
 def parse_cookies(cookie_string):
     cookies = {}
-    for item in cookie_string.split(';'):
+
+    for item in cookie_string.split(";"):
         item = item.strip()
+
         if not item:
             continue
-        if '=' in item:
-            k, v = item.split('=', 1)
-            cookies[k] = v
+
+        if "=" in item:
+            key, value = item.split("=", 1)
+            cookies[key] = value
+
     return cookies
 
+
 def sanitize_name(name):
-    # Replace characters that are invalid in file/directory names: \ / : * ? " < > |
-    sanitized = re.sub(r'[\\/*?:"<>|]', '_', name)
-    # Strip leading/trailing whitespaces or dots
-    sanitized = sanitized.strip(' .')
-    # Collapse multiple underscores
-    sanitized = re.sub(r'_+', '_', sanitized)
+    # Replace characters that are invalid in file/directory names.
+    sanitized = re.sub(r'[\\/*?:"<>|]', "_", name)
+
+    # Strip leading/trailing whitespaces or dots.
+    sanitized = sanitized.strip(" .")
+
+    # Collapse multiple underscores.
+    sanitized = re.sub(r"_+", "_", sanitized)
+
     return sanitized
+
 
 def has_local_solution(solved_dir, title, lang):
     if not os.path.exists(solved_dir):
         return False
+
     safe_title = sanitize_name(title)
     ext = LANG_TO_EXT.get(lang.lower(), lang.lower())
+
     for item in os.listdir(solved_dir):
         if item.endswith(f".{safe_title}"):
-            file_path = os.path.join(solved_dir, item, f"solution.{ext}")
+            file_path = os.path.join(
+                solved_dir,
+                item,
+                f"solution.{ext}",
+            )
+
             if os.path.exists(file_path):
                 return True
+
     return False
 
+
 def load_dotenv(dotenv_path=".env"):
-    if os.path.exists(dotenv_path):
-        try:
-            with open(dotenv_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    if '=' in line:
-                        key, val = line.split('=', 1)
-                        key = key.strip()
-                        val = val.strip()
-                        # Remove surrounding quotes (both single and double) if present
-                        if len(val) >= 2 and (
-                            (val.startswith('"') and val.endswith('"')) or
-                            (val.startswith("'") and val.endswith("'"))
-                        ):
-                            val = val[1:-1]
-                        os.environ[key] = val
-        except Exception as e:
-            print(f"Warning: Failed to load .env file from {dotenv_path}: {e}")
+    if not os.path.exists(dotenv_path):
+        return
+
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+
+                if not line or line.startswith("#"):
+                    continue
+
+                if "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+
+                # Remove surrounding quotes.
+                if len(value) >= 2:
+                    if (
+                        value.startswith('"')
+                        and value.endswith('"')
+                    ) or (
+                        value.startswith("'")
+                        and value.endswith("'")
+                    ):
+                        value = value[1:-1]
+
+                os.environ[key] = value
+
+    except Exception as error:
+        print(
+            f"Warning: Failed to load .env file "
+            f"from {dotenv_path}: {error}"
+        )
+
 
 def load_config(env_path):
     load_dotenv(env_path)
@@ -165,105 +248,182 @@ def load_config(env_path):
 
     # Priority:
     # 1. LEETCODE_COOKIE
-    # 2. LEETCODE_SESSION & LEETCODE_CSRF_TOKEN
-    cookie = os.environ.get('LEETCODE_COOKIE')
+    # 2. LEETCODE_SESSION + LEETCODE_CSRF_TOKEN
+    cookie = os.environ.get("LEETCODE_COOKIE")
+
     if not cookie:
-        session = os.environ.get('LEETCODE_SESSION')
-        csrf = os.environ.get('LEETCODE_CSRF_TOKEN', '')
+        session = os.environ.get("LEETCODE_SESSION")
+        csrf = os.environ.get("LEETCODE_CSRF_TOKEN", "")
+
         if session:
-            cookie = f"LEETCODE_SESSION={session}; csrftoken={csrf};"
+            cookie = (
+                f"LEETCODE_SESSION={session}; "
+                f"csrftoken={csrf};"
+            )
 
-    config['cookie'] = cookie or ''
-    config['domain'] = os.environ.get('LEETCODE_DOMAIN', DEFAULT_DOMAIN)
+    config["cookie"] = cookie or ""
+    config["domain"] = os.environ.get(
+        "LEETCODE_DOMAIN",
+        DEFAULT_DOMAIN,
+    )
 
-    delay_str = os.environ.get('LEETCODE_DELAY')
+    delay_str = os.environ.get("LEETCODE_DELAY")
+
     if delay_str:
         try:
-            config['rate_limit_delay'] = float(delay_str)
+            config["rate_limit_delay"] = float(delay_str)
         except ValueError:
-            config['rate_limit_delay'] = DEFAULT_DELAY
+            config["rate_limit_delay"] = DEFAULT_DELAY
     else:
-        config['rate_limit_delay'] = DEFAULT_DELAY
+        config["rate_limit_delay"] = DEFAULT_DELAY
 
     return config
+
 
 def update_env_var(dotenv_path, key, value):
     lines = []
     found = False
+
     if os.path.exists(dotenv_path):
         try:
-            with open(dotenv_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except Exception as e:
-            print(f"Warning: Failed to read {dotenv_path} for updating: {e}")
+            with open(dotenv_path, "r", encoding="utf-8") as file:
+                lines = file.readlines()
 
-    # Iterate through the lines and look for key=
-    for idx, line in enumerate(lines):
+        except Exception as error:
+            print(
+                f"Warning: Failed to read {dotenv_path} "
+                f"for updating: {error}"
+            )
+
+    for index, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith('#') or not '=' in stripped:
+
+        if stripped.startswith("#") or "=" not in stripped:
             continue
-        line_key, _ = stripped.split('=', 1)
+
+        line_key, _ = stripped.split("=", 1)
+
         if line_key.strip() == key:
-            lines[idx] = f"{key}={value}\n"
+            lines[index] = f"{key}={value}\n"
             found = True
             break
 
     if not found:
-        # If not found, check if last line ends with newline
-        if lines and not lines[-1].endswith('\n'):
-            lines.append('\n')
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+
         lines.append(f"{key}={value}\n")
 
     try:
-        with open(dotenv_path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-    except Exception as e:
-        print(f"Error writing to {dotenv_path}: {e}")
+        with open(dotenv_path, "w", encoding="utf-8") as file:
+            file.writelines(lines)
+
+    except Exception as error:
+        print(f"Error writing to {dotenv_path}: {error}")
+
 
 def load_state(env_path):
     load_dotenv(env_path)
-    ts_str = os.environ.get("LEETCODE_LAST_SYNCED_TIMESTAMP", "0")
+
+    timestamp_string = os.environ.get(
+        "LEETCODE_LAST_SYNCED_TIMESTAMP",
+        "0",
+    )
+
     try:
-        ts = int(ts_str)
+        timestamp = int(timestamp_string)
     except ValueError:
-        ts = 0
-    return {"last_synced_timestamp": ts}
+        timestamp = 0
+
+    return {
+        "last_synced_timestamp": timestamp
+    }
+
 
 def save_state(env_path, state):
-    ts = state.get("last_synced_timestamp", 0)
+    timestamp = state.get(
+        "last_synced_timestamp",
+        0,
+    )
+
     try:
-        update_env_var(env_path, "LEETCODE_LAST_SYNCED_TIMESTAMP", ts)
-        os.environ["LEETCODE_LAST_SYNCED_TIMESTAMP"] = str(ts)
-    except Exception as e:
-        print(f"Error saving state to {env_path}: {e}")
+        update_env_var(
+            env_path,
+            "LEETCODE_LAST_SYNCED_TIMESTAMP",
+            timestamp,
+        )
+
+        os.environ["LEETCODE_LAST_SYNCED_TIMESTAMP"] = str(
+            timestamp
+        )
+
+    except Exception as error:
+        print(f"Error saving state to {env_path}: {error}")
+
+
+# ================================================================
+# GraphQL
+# ================================================================
 
 def query_graphql(query, variables, headers, domain):
     url = f"https://{domain}/graphql"
+
     max_retries = 3
     backoff = 1.5
+
     for attempt in range(max_retries):
         try:
-            resp = requests.post(
+            response = requests.post(
                 url,
-                json={"query": query, "variables": variables},
+                json={
+                    "query": query,
+                    "variables": variables,
+                },
                 headers=headers,
-                timeout=30
+                timeout=30,
             )
-            if resp.status_code != 200:
-                if resp.status_code == 403:
-                    raise Exception("GraphQL request failed with HTTP 403 (Forbidden). Your cookies might be invalid or expired.")
-                raise Exception(f"GraphQL request failed with HTTP {resp.status_code}: {resp.text}")
 
-            data = resp.json()
-            if 'errors' in data:
-                raise Exception(f"GraphQL returned errors: {data['errors']}")
-            return data.get('data', {})
-        except Exception as e:
+            if response.status_code != 200:
+                if response.status_code == 403:
+                    raise Exception(
+                        "GraphQL request failed with HTTP 403 "
+                        "(Forbidden). Your cookies might be "
+                        "invalid or expired."
+                    )
+
+                raise Exception(
+                    f"GraphQL request failed with HTTP "
+                    f"{response.status_code}: {response.text}"
+                )
+
+            data = response.json()
+
+            if "errors" in data:
+                raise Exception(
+                    f"GraphQL returned errors: "
+                    f"{data['errors']}"
+                )
+
+            return data.get("data", {})
+
+        except Exception as error:
             if attempt == max_retries - 1:
-                raise e
-            print(f"\n[Warning] GraphQL request failed (attempt {attempt + 1}/{max_retries}). Retrying in {backoff}s... (Error: {e})")
+                raise error
+
+            print(
+                f"\n[Warning] GraphQL request failed "
+                f"(attempt {attempt + 1}/{max_retries}). "
+                f"Retrying in {backoff}s... "
+                f"(Error: {error})"
+            )
+
             time.sleep(backoff)
             backoff *= 2
+
+
+# ================================================================
+# Terminal Utilities
+# ================================================================
 
 def get_terminal_width():
     try:
@@ -271,61 +431,348 @@ def get_terminal_width():
     except OSError:
         return 80
 
-def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=30, fill='█'):
-    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-    filled_length = int(length * iteration // total)
-    bar = fill * filled_length + '░' * (length - filled_length)
 
-    static_part = f"{prefix} |{bar}| {percent}% "
+def print_progress_bar(
+    iteration,
+    total,
+    prefix="",
+    suffix="",
+    decimals=1,
+    length=30,
+    fill="█",
+):
+    percent = (
+        "{0:." + str(decimals) + "f}"
+    ).format(
+        100 * (iteration / float(total))
+    )
+
+    filled_length = int(
+        length * iteration // total
+    )
+
+    bar = (
+        fill * filled_length
+        + "░" * (length - filled_length)
+    )
+
+    static_part = (
+        f"{prefix} |{bar}| {percent}% "
+    )
+
     width = get_terminal_width()
 
-    # Leave room for carriage return and potential terminal quirks
     max_suffix_len = width - len(static_part) - 4
-    if max_suffix_len > 0 and len(suffix) > max_suffix_len:
+
+    if (
+        max_suffix_len > 0
+        and len(suffix) > max_suffix_len
+    ):
         suffix = suffix[:max_suffix_len - 3] + "..."
 
-    sys.stdout.write(f'\r\033[K{static_part}{suffix}')
+    sys.stdout.write(
+        f"\r\033[K{static_part}{suffix}"
+    )
+
     sys.stdout.flush()
+
     if iteration == total:
-        sys.stdout.write('\n')
+        sys.stdout.write("\n")
         sys.stdout.flush()
 
+
+# ================================================================
+# My Problems Feature
+# ================================================================
+
+def fetch_my_solved_problems(headers, domain):
+    """
+    Fetch all problems that LeetCode officially marks
+    as accepted for the authenticated user.
+    """
+
+    solved_problems = []
+
+    skip = 0
+    limit = 100
+
+    print("Fetching solved problems...")
+
+    while True:
+        variables = {
+            "categorySlug": "",
+            "skip": skip,
+            "limit": limit,
+            "filters": {
+                "status": "AC"
+            },
+        }
+
+        try:
+            data = query_graphql(
+                MY_SOLVED_PROBLEMS_QUERY,
+                variables,
+                headers,
+                domain,
+            )
+
+        except Exception as error:
+            print(
+                f"Error fetching solved problems: {error}"
+            )
+            sys.exit(1)
+
+        problem_data = data.get(
+            "problemsetQuestionList"
+        )
+
+        if not problem_data:
+            print(
+                "Error: Failed to retrieve solved problems."
+            )
+            sys.exit(1)
+
+        questions = problem_data.get(
+            "questions",
+            [],
+        )
+
+        if not questions:
+            break
+
+        for question in questions:
+            problem_id = question.get(
+                "frontendQuestionId"
+            )
+
+            title = question.get("title")
+
+            if not problem_id or not title:
+                continue
+
+            try:
+                problem_number = int(problem_id)
+
+            except ValueError:
+                continue
+
+            solved_problems.append(
+                {
+                    "problem_number": problem_number,
+                    "title": title,
+                }
+            )
+
+        total = problem_data.get("total", 0)
+
+        print(
+            f"Retrieved {len(solved_problems)} "
+            f"of {total} solved problems..."
+        )
+
+        skip += limit
+
+        if skip >= total:
+            break
+
+        time.sleep(0.5)
+
+    # Sort by problem number.
+    solved_problems.sort(
+        key=lambda problem: problem["problem_number"]
+    )
+
+    return solved_problems
+
+
+def save_my_problems(problems):
+    """
+    Save all solved problems to my_problems.txt.
+    """
+
+    try:
+        with open(
+            MY_PROBLEMS_FILE,
+            "w",
+            encoding="utf-8",
+        ) as file:
+
+            for problem in problems:
+                file.write(
+                    f"{problem['problem_number']}. "
+                    f"{problem['title']}\n"
+                )
+
+        print(
+            f"\nSuccessfully generated "
+            f"{len(problems)} solved problems."
+        )
+
+        print(
+            f"Saved to: {MY_PROBLEMS_FILE}"
+        )
+
+    except Exception as error:
+        print(
+            f"Error saving solved problems file: {error}"
+        )
+        sys.exit(1)
+
+
+# ================================================================
+# Main
+# ================================================================
+
 def main():
-    parser = argparse.ArgumentParser(description="Sync solved LeetCode solutions to local files.")
-    parser.add_argument("--env", default=os.path.join(SCRIPT_DIR, ".env"), help="Path to .env config file")
-    parser.add_argument("--reset", action="store_true", help="Reset sync state and download everything from scratch")
-    parser.add_argument("--delay", type=float, help="Delay between downloading submissions (in seconds)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Sync solved LeetCode solutions "
+            "to local files."
+        )
+    )
+
+    parser.add_argument(
+        "--env",
+        default=os.path.join(SCRIPT_DIR, ".env"),
+        help="Path to .env config file",
+    )
+
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help=(
+            "Reset sync state and download "
+            "everything from scratch"
+        ),
+    )
+
+    parser.add_argument(
+        "--delay",
+        type=float,
+        help=(
+            "Delay between downloading submissions "
+            "(in seconds)"
+        ),
+    )
+
+    parser.add_argument(
+        "--my-problems",
+        action="store_true",
+        help=(
+            "Generate a text file containing all "
+            "solved LeetCode problems"
+        ),
+    )
+
     args = parser.parse_args()
 
-    # Auto-migration: If .env doesn't exist, but config.json exists, migrate it!
-    if not os.path.exists(args.env) and os.path.exists(os.path.join(SCRIPT_DIR, "config.json")):
-        print("Found legacy 'config.json'. Migrating configuration to '.env'...")
+    # Auto-migration from config.json.
+    if (
+        not os.path.exists(args.env)
+        and os.path.exists(
+            os.path.join(SCRIPT_DIR, "config.json")
+        )
+    ):
+        print(
+            "Found legacy 'config.json'. "
+            "Migrating configuration to '.env'..."
+        )
+
         try:
-            with open(os.path.join(SCRIPT_DIR, "config.json"), "r", encoding="utf-8") as f:
-                old_config = json.load(f)
+            with open(
+                os.path.join(
+                    SCRIPT_DIR,
+                    "config.json",
+                ),
+                "r",
+                encoding="utf-8",
+            ) as file:
+                old_config = json.load(file)
+
             cookie_str = old_config.get("cookie", "")
             cookies = parse_cookies(cookie_str)
-            session = cookies.get("LEETCODE_SESSION", "")
-            csrf = cookies.get("csrftoken", "")
-            domain = old_config.get("domain", "leetcode.com")
-            delay_val = old_config.get("rate_limit_delay", 1.0)
 
-            with open(args.env, "w", encoding="utf-8") as f:
-                f.write("# LeetCode Configuration Environment Variables\n\n")
-                f.write(f"LEETCODE_SESSION={session}\n")
-                f.write(f"LEETCODE_CSRF_TOKEN={csrf}\n")
-                f.write(f"LEETCODE_DOMAIN={domain}\n")
-                f.write(f"LEETCODE_DELAY={delay_val}\n")
-            print(f"Migration complete! Created '{args.env}' successfully.")
+            session = cookies.get(
+                "LEETCODE_SESSION",
+                "",
+            )
+
+            csrf = cookies.get(
+                "csrftoken",
+                "",
+            )
+
+            domain = old_config.get(
+                "domain",
+                DEFAULT_DOMAIN,
+            )
+
+            delay_value = old_config.get(
+                "rate_limit_delay",
+                DEFAULT_DELAY,
+            )
+
+            with open(
+                args.env,
+                "w",
+                encoding="utf-8",
+            ) as file:
+
+                file.write(
+                    "# LeetCode Configuration "
+                    "Environment Variables\n\n"
+                )
+
+                file.write(
+                    f"LEETCODE_SESSION={session}\n"
+                )
+
+                file.write(
+                    f"LEETCODE_CSRF_TOKEN={csrf}\n"
+                )
+
+                file.write(
+                    f"LEETCODE_DOMAIN={domain}\n"
+                )
+
+                file.write(
+                    f"LEETCODE_DELAY={delay_value}\n"
+                )
+
+            print(
+                f"Migration complete! "
+                f"Created '{args.env}' successfully."
+            )
+
             try:
-                os.rename(os.path.join(SCRIPT_DIR, "config.json"), os.path.join(SCRIPT_DIR, "config.json.bak"))
-                print("Renamed 'config.json' to 'config.json.bak' for backup.")
-            except Exception as e:
-                print(f"Warning: Could not rename config.json: {e}")
-        except Exception as e:
-            print(f"Warning: Migration failed: {e}")
+                os.rename(
+                    os.path.join(
+                        SCRIPT_DIR,
+                        "config.json",
+                    ),
+                    os.path.join(
+                        SCRIPT_DIR,
+                        "config.json.bak",
+                    ),
+                )
 
-    # If .env file doesn't exist, create it with placeholders
+                print(
+                    "Renamed 'config.json' to "
+                    "'config.json.bak' for backup."
+                )
+
+            except Exception as error:
+                print(
+                    f"Warning: Could not rename "
+                    f"config.json: {error}"
+                )
+
+        except Exception as error:
+            print(
+                f"Warning: Migration failed: {error}"
+            )
+
+    # Create .env template if it does not exist.
     if not os.path.exists(args.env):
         default_env = (
             "# LeetCode Configuration Environment Variables\n\n"
@@ -336,259 +783,643 @@ def main():
             "# LEETCODE_DOMAIN=leetcode.com\n"
             "# LEETCODE_DELAY=1.0\n"
         )
+
         try:
-            with open(args.env, "w", encoding="utf-8") as f:
-                f.write(default_env)
-            print(f"\nCreated configuration template at '{args.env}'.")
-            print("Please edit this file and replace the placeholder values with your actual LeetCode cookies.")
-            print("See README.md for instructions on how to retrieve your cookies.")
-        except Exception as e:
-            print(f"Error creating template .env file: {e}")
+            with open(
+                args.env,
+                "w",
+                encoding="utf-8",
+            ) as file:
+                file.write(default_env)
+
+            print(
+                f"\nCreated configuration template "
+                f"at '{args.env}'."
+            )
+
+            print(
+                "Please edit this file and replace "
+                "the placeholder values with your "
+                "actual LeetCode cookies."
+            )
+
+            print(
+                "See README.md for instructions on "
+                "how to retrieve your cookies."
+            )
+
+        except Exception as error:
+            print(
+                f"Error creating template .env file: "
+                f"{error}"
+            )
+
         sys.exit(1)
 
-    # Load configuration
+    # Load configuration.
     config = load_config(args.env)
 
-    # Auto-migration of state: If state.json exists, migrate it to the env file!
-    if os.path.exists(os.path.join(SCRIPT_DIR, "state.json")):
-        print("Found legacy 'state.json'. Migrating sync state to '.env'...")
-        try:
-            with open(os.path.join(SCRIPT_DIR, "state.json"), "r", encoding="utf-8") as f:
-                old_state = json.load(f)
-            ts = old_state.get("last_synced_timestamp", 0)
-            update_env_var(args.env, "LEETCODE_LAST_SYNCED_TIMESTAMP", ts)
-            os.environ["LEETCODE_LAST_SYNCED_TIMESTAMP"] = str(ts)
-            print(f"Migration complete! Saved last_synced_timestamp={ts} to '{args.env}'.")
-            try:
-                os.rename(os.path.join(SCRIPT_DIR, "state.json"), os.path.join(SCRIPT_DIR, "state.json.bak"))
-                print("Renamed 'state.json' to 'state.json.bak' for backup.")
-            except Exception as e:
-                print(f"Warning: Could not rename state.json: {e}")
-        except Exception as e:
-            print(f"Warning: State migration failed: {e}")
+    # Migrate legacy state.json if present.
+    if os.path.exists(
+        os.path.join(SCRIPT_DIR, "state.json")
+    ):
+        print(
+            "Found legacy 'state.json'. "
+            "Migrating sync state to '.env'..."
+        )
 
-    # Check if the cookie is set and is not a placeholder
-    cookie_val = config.get('cookie', '')
-    if (not cookie_val or
-        "your_leetcode_session_here" in cookie_val or
-        "your_csrftoken_here" in cookie_val or
-        "your_leetcode_session_here" in os.environ.get('LEETCODE_SESSION', '') or
-        "your_csrftoken_here" in os.environ.get('LEETCODE_CSRF_TOKEN', '')):
-        print(f"\nError: Please configure your actual LeetCode cookie in '{args.env}'.")
-        print("It currently contains placeholder values or is empty.")
-        print("See README.md for details on how to get your cookies.")
+        try:
+            with open(
+                os.path.join(
+                    SCRIPT_DIR,
+                    "state.json",
+                ),
+                "r",
+                encoding="utf-8",
+            ) as file:
+                old_state = json.load(file)
+
+            timestamp = old_state.get(
+                "last_synced_timestamp",
+                0,
+            )
+
+            update_env_var(
+                args.env,
+                "LEETCODE_LAST_SYNCED_TIMESTAMP",
+                timestamp,
+            )
+
+            os.environ[
+                "LEETCODE_LAST_SYNCED_TIMESTAMP"
+            ] = str(timestamp)
+
+            print(
+                f"Migration complete! "
+                f"Saved last_synced_timestamp={timestamp} "
+                f"to '{args.env}'."
+            )
+
+            try:
+                os.rename(
+                    os.path.join(
+                        SCRIPT_DIR,
+                        "state.json",
+                    ),
+                    os.path.join(
+                        SCRIPT_DIR,
+                        "state.json.bak",
+                    ),
+                )
+
+                print(
+                    "Renamed 'state.json' to "
+                    "'state.json.bak' for backup."
+                )
+
+            except Exception as error:
+                print(
+                    f"Warning: Could not rename "
+                    f"state.json: {error}"
+                )
+
+        except Exception as error:
+            print(
+                f"Warning: State migration failed: {error}"
+            )
+
+    # Validate cookie configuration.
+    cookie_value = config.get("cookie", "")
+
+    if (
+        not cookie_value
+        or "your_leetcode_session_here" in cookie_value
+        or "your_csrftoken_here" in cookie_value
+        or "your_leetcode_session_here"
+        in os.environ.get("LEETCODE_SESSION", "")
+        or "your_csrftoken_here"
+        in os.environ.get("LEETCODE_CSRF_TOKEN", "")
+    ):
+        print(
+            f"\nError: Please configure your actual "
+            f"LeetCode cookie in '{args.env}'."
+        )
+
+        print(
+            "It currently contains placeholder values "
+            "or is empty."
+        )
+
+        print(
+            "See README.md for details on how to "
+            "get your cookies."
+        )
+
         sys.exit(1)
 
-    cookie_str = config['cookie']
-    domain = config.get('domain', DEFAULT_DOMAIN)
-    delay = args.delay if args.delay is not None else config.get('rate_limit_delay', DEFAULT_DELAY)
+    cookie_string = config["cookie"]
 
-    # Parse cookies to extract csrftoken
-    cookies = parse_cookies(cookie_str)
-    csrf_token = cookies.get('csrftoken')
+    domain = config.get(
+        "domain",
+        DEFAULT_DOMAIN,
+    )
+
+    delay = (
+        args.delay
+        if args.delay is not None
+        else config.get(
+            "rate_limit_delay",
+            DEFAULT_DELAY,
+        )
+    )
+
+    # Parse cookies to extract csrftoken.
+    cookies = parse_cookies(cookie_string)
+    csrf_token = cookies.get("csrftoken")
+
     if not csrf_token:
-        # Try finding x-csrftoken or csrf token from session
-        print("Warning: 'csrftoken' cookie not found in the provided cookie string.")
-        print("Proceeding, but requests might fail if CSRF validation is strict.")
+        print(
+            "Warning: 'csrftoken' cookie not found "
+            "in the provided cookie string."
+        )
 
-    # Setup headers
+        print(
+            "Proceeding, but requests might fail if "
+            "CSRF validation is strict."
+        )
+
+    # Setup headers.
     headers = {
         "User-Agent": DEFAULT_USER_AGENT,
         "Content-Type": "application/json",
         "Referer": f"https://{domain}",
-        "Cookie": cookie_str
+        "Cookie": cookie_string,
     }
+
     if csrf_token:
         headers["x-csrftoken"] = csrf_token
 
-    # Load or reset state
+    # Verify authentication.
+    try:
+        status_data = query_graphql(
+            USER_STATUS_QUERY,
+            {},
+            headers,
+            domain,
+        )
+
+        user_status = status_data.get(
+            "userStatus",
+            {},
+        )
+
+        if not user_status.get("isSignedIn"):
+            print(
+                "\nError: LeetCode does not recognize "
+                "you as signed in."
+            )
+
+            print(
+                "Your LEETCODE_SESSION / csrftoken "
+                "cookies are likely expired or invalid."
+            )
+
+            print(
+                f"Please grab fresh cookies from "
+                f"{domain} and update '{args.env}'."
+            )
+
+            sys.exit(1)
+
+        print(
+            f"Authenticated as: "
+            f"{user_status.get('username')}"
+        )
+
+    except Exception as error:
+        print(
+            f"\nWarning: Could not verify "
+            f"authentication status: {error}"
+        )
+
+    # ============================================================
+    # Handle --my-problems
+    # ============================================================
+
+    if args.my_problems:
+        solved_problems = fetch_my_solved_problems(
+            headers,
+            domain,
+        )
+
+        if not solved_problems:
+            print("\nNo solved problems were found.")
+            sys.exit(0)
+
+        save_my_problems(solved_problems)
+
+        # Do not continue with normal sync.
+        sys.exit(0)
+
+    # ============================================================
+    # Normal Sync Logic
+    # ============================================================
+
     if args.reset:
-        state = {"last_synced_timestamp": 0}
-        print("Resetting sync state. Script will sync all solved questions.")
+        state = {
+            "last_synced_timestamp": 0
+        }
+
+        print(
+            "Resetting sync state. Script will sync "
+            "all solved questions."
+        )
+
     else:
         state = load_state(args.env)
 
-    last_synced_ts = state.get("last_synced_timestamp", 0)
-    print(f"Syncing submissions solved after: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_synced_ts)) if last_synced_ts > 0 else 'Beginning of time'}")
+    last_synced_timestamp = state.get(
+        "last_synced_timestamp",
+        0,
+    )
 
-    # Verify authentication before doing anything else. LeetCode's submissionList
-    # query does NOT error out on a stale/invalid cookie -- it just silently
-    # returns an empty submissions list, which looks identical to "already synced".
-    try:
-        status_data = query_graphql(USER_STATUS_QUERY, {}, headers, domain)
-        user_status = status_data.get('userStatus', {})
-        if not user_status.get('isSignedIn'):
-            print("\nError: LeetCode does not recognize you as signed in.")
-            print("Your LEETCODE_SESSION / csrftoken cookies are likely expired or invalid.")
-            print(f"Please grab fresh cookies from {domain} and update '{args.env}'.")
-            sys.exit(1)
-        else:
-            print(f"Authenticated as: {user_status.get('username')}")
-    except Exception as e:
-        print(f"\nWarning: Could not verify authentication status: {e}")
+    if last_synced_timestamp > 0:
+        sync_time = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.localtime(last_synced_timestamp),
+        )
+    else:
+        sync_time = "Beginning of time"
 
-    # Fetch submissions paginated
+    print(
+        f"Syncing submissions solved after: {sync_time}"
+    )
+
+    # Fetch submissions.
     offset = 0
     limit = 20
     submissions_to_process = []
     has_next = True
 
     print("Fetching submission history...")
+
     while has_next:
         variables = {
             "offset": offset,
-            "limit": limit
+            "limit": limit,
         }
+
         try:
-            data = query_graphql(SUBMISSION_LIST_QUERY, variables, headers, domain)
-        except Exception as e:
-            print(f"Error fetching submissions list: {e}")
+            data = query_graphql(
+                SUBMISSION_LIST_QUERY,
+                variables,
+                headers,
+                domain,
+            )
+
+        except Exception as error:
+            print(
+                f"Error fetching submissions list: {error}"
+            )
             sys.exit(1)
 
-        sub_list_data = data.get('submissionList')
-        if not sub_list_data:
-            print("Error: Failed to retrieve submission list. Check if your cookies are valid.")
+        submission_list_data = data.get(
+            "submissionList"
+        )
+
+        if not submission_list_data:
+            print(
+                "Error: Failed to retrieve submission "
+                "list. Check if your cookies are valid."
+            )
             sys.exit(1)
 
-        submissions = sub_list_data.get('submissions', [])
+        submissions = submission_list_data.get(
+            "submissions",
+            [],
+        )
+
         if not submissions:
             break
 
         stop_fetching = False
-        for sub in submissions:
-            ts = int(sub['timestamp'])
-            if ts <= last_synced_ts:
+
+        for submission in submissions:
+            timestamp = int(
+                submission["timestamp"]
+            )
+
+            if timestamp <= last_synced_timestamp:
                 stop_fetching = True
                 break
-            submissions_to_process.append(sub)
+
+            submissions_to_process.append(
+                submission
+            )
 
         if stop_fetching:
-            print("Reached previously synchronized submissions.")
+            print(
+                "Reached previously synchronized submissions."
+            )
             break
 
-        has_next = sub_list_data.get('hasNext', False)
+        has_next = submission_list_data.get(
+            "hasNext",
+            False,
+        )
+
         offset += limit
-        print(f"Retrieved {len(submissions_to_process)} new submissions so far...")
+
+        print(
+            f"Retrieved {len(submissions_to_process)} "
+            f"new submissions so far..."
+        )
+
         time.sleep(0.5)
 
     if not submissions_to_process:
-        print("No new submissions found. Everything is up to date!")
+        print(
+            "No new submissions found. "
+            "Everything is up to date!"
+        )
         sys.exit(0)
 
-    # Filter out duplicate accepted submissions (keep only the newest accepted one for each titleSlug and language)
+    # Remove duplicate accepted submissions.
     seen_accepted = set()
-    deduped_count = 0
-    for sub in submissions_to_process:
-        if sub['statusDisplay'] == "Accepted":
-            key = (sub['titleSlug'], sub['lang'].lower())
+    deduplicated_count = 0
+
+    for submission in submissions_to_process:
+        if submission["statusDisplay"] == "Accepted":
+            key = (
+                submission["titleSlug"],
+                submission["lang"].lower(),
+            )
+
             if key in seen_accepted:
-                sub['statusDisplay'] = "Duplicate"
-                deduped_count += 1
+                submission["statusDisplay"] = "Duplicate"
+                deduplicated_count += 1
             else:
                 seen_accepted.add(key)
 
-    if deduped_count > 0:
-        print(f"Deduplicated {deduped_count} older accepted submissions (will skip downloading them).")
+    if deduplicated_count > 0:
+        print(
+            f"Deduplicated {deduplicated_count} "
+            f"older accepted submissions "
+            f"(will skip downloading them)."
+        )
 
-    # Reverse list to process chronologically (oldest first)
+    # Process chronologically.
     submissions_to_process.reverse()
-    print(f"\nProcessing {len(submissions_to_process)} submissions in chronological order...")
 
-    # Create LeetCode_Solutions directory if it doesn't exist
-    os.makedirs(SOLUTIONS_DIR, exist_ok=True)
+    print(
+        f"\nProcessing "
+        f"{len(submissions_to_process)} submissions "
+        f"in chronological order..."
+    )
+
+    os.makedirs(
+        SOLUTIONS_DIR,
+        exist_ok=True,
+    )
 
     success_count = 0
     skip_count = 0
 
-    for i, sub in enumerate(submissions_to_process, 1):
-        ts = int(sub['timestamp'])
-        sub_id = int(sub['id'])
-        title = sub['title']
-        status = sub['statusDisplay']
-        lang = sub['lang']
+    for index, submission in enumerate(
+        submissions_to_process,
+        1,
+    ):
+        timestamp = int(
+            submission["timestamp"]
+        )
 
-        # Clear line and show current item
-        status_suffix = f"({i}/{len(submissions_to_process)}) {title} [{status}]"
-        print_progress_bar(i - 1, len(submissions_to_process), prefix='Downloading', suffix=status_suffix, length=35)
+        submission_id = int(
+            submission["id"]
+        )
+
+        title = submission["title"]
+        status = submission["statusDisplay"]
+        language = submission["lang"]
+
+        status_suffix = (
+            f"({index}/{len(submissions_to_process)}) "
+            f"{title} [{status}]"
+        )
+
+        print_progress_bar(
+            index - 1,
+            len(submissions_to_process),
+            prefix="Downloading",
+            suffix=status_suffix,
+            length=35,
+        )
 
         if status != "Accepted":
-            state["last_synced_timestamp"] = ts
-            save_state(args.env, state)
+            state["last_synced_timestamp"] = timestamp
+
+            save_state(
+                args.env,
+                state,
+            )
+
             skip_count += 1
-            print_progress_bar(i, len(submissions_to_process), prefix='Downloading', suffix=status_suffix, length=35)
+
+            print_progress_bar(
+                index,
+                len(submissions_to_process),
+                prefix="Downloading",
+                suffix=status_suffix,
+                length=35,
+            )
+
             continue
 
-        # Check if we already have a local solution for this problem/language (e.g. from previous years/runs)
-        if has_local_solution(SOLUTIONS_DIR, title, lang):
-            state["last_synced_timestamp"] = ts
-            save_state(args.env, state)
+        # Check whether the solution already exists.
+        if has_local_solution(
+            SOLUTIONS_DIR,
+            title,
+            language,
+        ):
+            state["last_synced_timestamp"] = timestamp
+
+            save_state(
+                args.env,
+                state,
+            )
+
             skip_count += 1
-            print_progress_bar(i, len(submissions_to_process), prefix='Downloading', suffix=f"({i}/{len(submissions_to_process)}) {title} [Exists]", length=35)
+
+            print_progress_bar(
+                index,
+                len(submissions_to_process),
+                prefix="Downloading",
+                suffix=(
+                    f"({index}/"
+                    f"{len(submissions_to_process)}) "
+                    f"{title} [Exists]"
+                ),
+                length=35,
+            )
+
             continue
 
-        # Fetch details for the accepted submission
+        # Fetch submission details.
         try:
-            details_data = query_graphql(SUBMISSION_DETAILS_QUERY, {"submissionId": sub_id}, headers, domain)
-        except Exception as e:
-            sys.stdout.write('\n')
-            print(f"Error fetching details: {e}")
-            print("Stopping sync. You can run the script again to resume.")
+            details_data = query_graphql(
+                SUBMISSION_DETAILS_QUERY,
+                {
+                    "submissionId": submission_id
+                },
+                headers,
+                domain,
+            )
+
+        except Exception as error:
+            sys.stdout.write("\n")
+
+            print(
+                f"Error fetching details: {error}"
+            )
+
+            print(
+                "Stopping sync. You can run the script "
+                "again to resume."
+            )
+
             sys.exit(1)
 
-        sub_details = details_data.get('submissionDetails')
-        if not sub_details:
-            sys.stdout.write('\n')
-            print("Error: Could not retrieve submission details.")
+        submission_details = details_data.get(
+            "submissionDetails"
+        )
+
+        if not submission_details:
+            sys.stdout.write("\n")
+
+            print(
+                "Error: Could not retrieve "
+                "submission details."
+            )
+
             sys.exit(1)
 
-        code = sub_details.get('code')
-        question = sub_details.get('question', {})
-        question_id = question.get('questionId')
-        question_title = question.get('title')
+        code = submission_details.get("code")
 
-        if not code or not question_id or not question_title:
-            sys.stdout.write('\n')
-            print("Error: Missing code or question info in submission details.")
+        question = submission_details.get(
+            "question",
+            {},
+        )
+
+        question_id = question.get(
+            "questionId"
+        )
+
+        question_title = question.get(
+            "title"
+        )
+
+        if (
+            not code
+            or not question_id
+            or not question_title
+        ):
+            sys.stdout.write("\n")
+
+            print(
+                "Error: Missing code or question info "
+                "in submission details."
+            )
+
             sys.exit(1)
 
-        # Map language to file extension
-        ext = LANG_TO_EXT.get(lang.lower(), lang.lower())
+        # Determine file extension.
+        extension = LANG_TO_EXT.get(
+            language.lower(),
+            language.lower(),
+        )
 
-        # Sanitize folder name
-        safe_title = sanitize_name(question_title)
-        safe_id = sanitize_name(question_id)
-        folder_name = f"{safe_id}.{safe_title}"
-        problem_dir = os.path.join(SOLUTIONS_DIR, folder_name)
+        safe_title = sanitize_name(
+            question_title
+        )
 
-        # Create directory for the problem
-        os.makedirs(problem_dir, exist_ok=True)
+        safe_id = sanitize_name(
+            question_id
+        )
 
-        # Save code to solution file
-        file_name = f"solution.{ext}"
-        file_path = os.path.join(problem_dir, file_name)
+        folder_name = (
+            f"{safe_id}.{safe_title}"
+        )
+
+        problem_directory = os.path.join(
+            SOLUTIONS_DIR,
+            folder_name,
+        )
+
+        os.makedirs(
+            problem_directory,
+            exist_ok=True,
+        )
+
+        file_name = f"solution.{extension}"
+
+        file_path = os.path.join(
+            problem_directory,
+            file_name,
+        )
 
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(code)
+            with open(
+                file_path,
+                "w",
+                encoding="utf-8",
+            ) as file:
+                file.write(code)
+
             success_count += 1
-        except Exception as e:
-            sys.stdout.write('\n')
-            print(f"Error saving file: {e}")
-            print("Stopping sync. You can run the script again to resume.")
+
+        except Exception as error:
+            sys.stdout.write("\n")
+
+            print(
+                f"Error saving file: {error}"
+            )
+
+            print(
+                "Stopping sync. You can run the script "
+                "again to resume."
+            )
+
             sys.exit(1)
 
-        # Update state timestamp
-        state["last_synced_timestamp"] = ts
-        save_state(args.env, state)
+        # Update sync state.
+        state["last_synced_timestamp"] = timestamp
 
-        # Update progress bar showing success
-        print_progress_bar(i, len(submissions_to_process), prefix='Downloading', suffix=f"({i}/{len(submissions_to_process)}) {title} [Synced]", length=35)
+        save_state(
+            args.env,
+            state,
+        )
 
-        # Delay to prevent rate-limiting
-        if i < len(submissions_to_process):
+        print_progress_bar(
+            index,
+            len(submissions_to_process),
+            prefix="Downloading",
+            suffix=(
+                f"({index}/"
+                f"{len(submissions_to_process)}) "
+                f"{title} [Synced]"
+            ),
+            length=35,
+        )
+
+        # Delay to prevent rate limiting.
+        if index < len(submissions_to_process):
             time.sleep(delay)
 
-    print(f"\nSync complete! Success: {success_count}, Skipped: {skip_count}")
+    print(
+        f"\nSync complete! "
+        f"Success: {success_count}, "
+        f"Skipped: {skip_count}"
+    )
+
 
 if __name__ == "__main__":
     main()
